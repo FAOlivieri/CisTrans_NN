@@ -30,14 +30,19 @@ def PreProcess(loopsdb,Variable_of_interest):
     df_shuffle["Model_int"] = Model_int
 
     # Me quedo con 100 de cada una
-    df_cis = df_shuffle[df_shuffle["Model"] == "Cis"].head(100)
-    df_trans = df_shuffle[df_shuffle["Model"] == "Trans"].head(100)
+    wantedLength=100
+    cisRemain = len(df_shuffle[df_shuffle["Model"] == "Cis"])
+    transRemain = len(df_shuffle[df_shuffle["Model"] == "Trans"])
+    df_cis = df_shuffle[df_shuffle["Model"] == "Cis"].head(wantedLength)
+    df_trans = df_shuffle[df_shuffle["Model"] == "Trans"].head(wantedLength)
+    df_trans_unused = df_shuffle[df_shuffle["Model"] == "Trans"].tail(transRemain-wantedLength)
+    df_cis_unused = df_shuffle[df_shuffle["Model"] == "Cis"].tail(cisRemain - wantedLength)
 
     df_cis = df_cis.sample(frac=1)
     df_trans = df_trans.sample(frac=1)
 
     # Separo en train y test
-    percentage = 70
+    percentage = 80
     cis_train_df, cis_test_df = np.split(df_cis, [int((percentage / 100) * len(df_cis))])
     trans_train_df, trans_test_df = np.split(df_trans, [int((percentage / 100) * len(df_trans))])
 
@@ -49,7 +54,7 @@ def PreProcess(loopsdb,Variable_of_interest):
     test_texts = test_df[Variable_of_interest].values
     test_texts = [s.lower() for s in test_texts]
 
-    return train_df, test_df, train_texts, test_texts
+    return train_df, test_df, train_texts, test_texts, df_trans_unused,df_cis_unused
 
 def Tokenize(train_texts, test_texts, padding_size):
     tk = Tokenizer(num_words=None, char_level=True, oov_token='UNK')
@@ -115,14 +120,17 @@ def analyzeResults(test_df,results):
                 trans_hits += 1
             else:
                 cis_hits += 1
+    if len(test_results_df[test_results_df["Model"] == "Cis"]) !=0:
+        accuracyCis=cis_hits / len(test_results_df[test_results_df["Model"] == "Cis"])
+    else:
+        accuracyCis=0
 
+    if len(test_results_df[test_results_df["Model"] == "Trans"]) != 0:
+        accuracyTrans=trans_hits / len(test_results_df[test_results_df["Model"] == "Trans"])
+    else:
+        accuracyTrans=0
     print("Total accuracy:%s |   Trans accuracy:%s  | Cis accuracy:%s" % (hits / len(test_results_df),
-                                                                          trans_hits / len(
-                                                                              test_results_df[test_results_df[
-                                                                                                  "Model"] == "Trans"]),
-                                                                          cis_hits / len(
-                                                                              test_results_df[test_results_df[
-                                                                                                  "Model"] == "Cis"])))
+                                                                          accuracyTrans, accuracyCis))
     return test_results_df
 
 def testSequence(test):
@@ -248,13 +256,15 @@ def trainModel(train_df, test_df, classVariable, epochs, patience):
                         callbacks=[callback])
     return model
 
-def saveModel(model,filename):
+def saveModel(model,filename,train_df,test_df):
     model_json = model.to_json()
     with open("model.json", "w") as json_file:
         json_file.write(model_json)
     # serialize weights to HDF5
     model.save_weights("%s.h5" % (filename))
-    print("Saved model to disk")
+    test_df.to_csv("test-%s.csv"% (filename),index=False)
+    train_df.to_csv("train-%s.csv"% (filename),index=False)
+    print("Saved model and datasets to disk")
 
 def loadModel(filename):
     # load json and create model
@@ -270,22 +280,26 @@ def loadModel(filename):
 
 loops_db = pd.read_excel('/Disco2/ColabFold/HisKA1_PFAM/Secuencias_Loops.ods', engine='odf')
 Variable_of_interest = "Sequence"
-train_df, test_df, train_texts, test_texts = PreProcess(loops_db,Variable_of_interest)
+train_df, test_df, train_texts, test_texts, df_trans_unused, df_cis_unused = PreProcess(loops_db,Variable_of_interest)
 padding_size = 140
 tk, train_data, test_data = Tokenize(train_texts, test_texts, padding_size)
 
 model = trainModel(train_df, test_df, "Model_int", 80, 10)
-model = loadModel("80%")
-# saveModel(model, "80%")
+
+filename= "80%"
+# model = loadModel(filename)
+# saveModel(model, filename)
+
 
 #################Multi_Test#####################
-test_array = test_df[Variable_of_interest]
+df_to_test=df_trans_unused #normalmente es test_df, df_trans_unused o df_cis_unused
+test_array = df_to_test[Variable_of_interest]
 # test_array=test_df[test_df["Model"] =="Cis"]["Sequence"]
 results = testArray(test_array)
-test_results_df=analyzeResults(test_df,results)
+test_results_df=analyzeResults(df_to_test,results)
 
 
-test_results_df.to_csv("out.csv",index=False)
+#test_results_df.to_csv("results.csv",index=False)
 
 #################Single_Test#####################
 
